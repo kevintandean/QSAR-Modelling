@@ -23,7 +23,7 @@ def timeit(method):
 
 def load_and_clean(path):
     df = pd.read_csv(path, sep='\t')
-    descriptors = df.iloc[:, 15:]
+    descriptors = df.iloc[:, 15:150]
     logbb = df['LOG BB']
 
     def binarize(x):
@@ -60,6 +60,8 @@ def load_and_clean(path):
     return descriptors
 
 descriptors = load_and_clean('all data full descriptors.txt')
+print descriptors.head()
+
 
 def split(data, size):
     grouped = data.groupby('LOG BB')
@@ -67,12 +69,12 @@ def split(data, size):
     bbb_pos = grouped.get_group(1.0)
 
 
-    x_pos = bbb_pos.iloc[:929,0:2756].values
-    y_pos = bbb_pos.iloc[:929,2756:2757].values
+    x_pos = bbb_pos.iloc[:929,0:135].values
+    y_pos = bbb_pos.iloc[:929,135:136].values
     x_pos_train, x_pos_test, y_pos_train, y_pos_test = train_test_split(x_pos, y_pos, test_size=size, random_state=100)
 
-    x_neg = bbb_neg.iloc[:,0:2756].values
-    y_neg = bbb_neg.iloc[:,2756:2757].values
+    x_neg = bbb_neg.iloc[:,0:135].values
+    y_neg = bbb_neg.iloc[:,135:136].values
     x_neg_train, x_neg_test, y_neg_train, y_neg_test = train_test_split(x_neg, y_neg, test_size=size, random_state=100)
 
     x_train = np.append(x_pos_train, x_neg_train, axis = 0)
