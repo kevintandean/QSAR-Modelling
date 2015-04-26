@@ -9,10 +9,9 @@ from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import SelectKBest, SelectPercentile
 from sklearn.feature_selection import chi2, f_classif
-from sklearn.pipeline import make_pipeline
 from joblib import Parallel, delayed
-
-
+from sklearn.decomposition import KernelPCA
+from sklearn.pipeline import make_pipeline
 
 
 def timeit(method):
@@ -30,7 +29,7 @@ def timeit(method):
 
 def load_and_clean(path, start, descriptors_n):
     df = pd.read_csv(path, sep='\t')
-    descriptors = df.iloc[:, start:descriptors_n+1]
+    descriptors = df.iloc[:, start:]
     # descriptors = descriptors.loc[df['LOG BB'] == 'BBB+'] + descriptors.loc[df['LOG BB'] == 'BBB-']
     # mask = df['LOG BB'] == 'BBB+'
     # mask2 = df['LOG BB'] == 'BBB-'
@@ -161,11 +160,7 @@ def optimize_pca(x_train,x_test,y_train,y_test,n_test):
 
     return d
 
-descriptors = load_and_clean('all data full descriptors.txt',15,2770)
-x_train, x_test, y_train, y_test = split(descriptors, 0.3)
 
-from sklearn.decomposition import KernelPCA
-from sklearn.pipeline import make_pipeline
 
 def find_max(dict,item):
     key = 0
@@ -194,15 +189,15 @@ def optimize(n_start, n_end):
     max_acc = find_max(data,'acc')
     return {'max_acc':max_acc}
 
-def pipeline_score(n):
+def pipeline_score(n, x_train,y_train,x_test,y_test):
     pipe = make_pipeline(preprocessing.StandardScaler(),ExtraTreesClassifier(), KernelPCA(n_components=n),svm.SVC())
     pipe.fit(x_train,y_train)
     predict = pipe.predict(x_test)
     score = metrics.accuracy_score(y_test, predict)
     return {'n':n,'score':score}
 
-def optimize_parallel(n_start, n_end):
-    data = Parallel(n_jobs=-1)(delayed(pipeline_score)(n) for n in range(n_start,n_end))
+def optimize_parallel(n_start, n_end, x_train,y_train,x_test,y_test):
+    data = Parallel(n_jobs=-1)(delayed(pipeline_score)(n,x_train,y_train,x_test,y_test) for n in range(n_start,n_end))
     max = 0
     max_key = 0
     for i in data:
@@ -213,8 +208,8 @@ def optimize_parallel(n_start, n_end):
 
 
 @timeit
-def common(n):
-    result = Parallel(n_jobs=-1)(delayed(optimize_parallel)(70,75) for i in range(n))
+def common(n,x_train,y_train,x_test,y_test):
+    result = Parallel(n_jobs=-1)(delayed(optimize_parallel)(70,130,x_train,y_train,x_test,y_test) for i in range(n))
     # for i in range(0,n):
     #     result[i] = optimize(70,120)
     return result
@@ -236,10 +231,28 @@ def find_common(data):
             result[n] = 1
     return {'n':max_key, 'score':max_value}
 
+
+def split_train(data, n):
+    x_train, x_test, y_train, y_test = split(data, n)
+    result = common(1,x_train,y_train,x_test,y_test)
+    return {'valid_fraction':n, 'score':result}
+
+def optimize_train(data, n_list):
+    result = Parallel(n_jobs=-1)(delayed(split_train)(data, n) for n in n_list)
+    return result
+
+
+
 if __name__ == '__main__':
-    data = common(100)
-    # result = find_common(data)
-    print data
+    descriptors = load_and_clean('all data full descriptors.txt',15,2770)
+    x_train, x_test, y_train, y_test = split(descriptors, 0.3)
+    result = common(100,x_train,y_train,x_test,y_test)
+    # result = optimize_train(descriptors,[0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8])
+    print result
+
+    # data = common(100,x_train,y_train,x_test,y_test)
+    # # result = find_common(data)
+    # print data
 # x_train_pca, x_test_pca, n= reduce_to(x_train,x_test,110)
 
 from sklearn.lda import LDA
@@ -276,6 +289,11 @@ def optimize_svm(xtrain, ytrain, xtest, ytest, c_range):
         print 'specificity:', specificity
         data[i] = score
     return data
+
+
+#
+# def split_train(n):
+#     x_train, x_test, y_train, y_test = split(descriptors, 0.3)
 
 
 
