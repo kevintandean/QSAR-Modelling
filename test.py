@@ -1,3 +1,4 @@
+import time
 
 __author__ = 'kevintandean'
 import pandas as pd
@@ -9,6 +10,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import SelectKBest, SelectPercentile
 from sklearn.feature_selection import chi2, f_classif
 from sklearn.pipeline import make_pipeline
+from joblib import Parallel, delayed
 
 
 
@@ -192,10 +194,29 @@ def optimize(n_start, n_end):
     max_acc = find_max(data,'acc')
     return {'max_acc':max_acc}
 
+def pipeline_score(n):
+    pipe = make_pipeline(preprocessing.StandardScaler(),ExtraTreesClassifier(), KernelPCA(n_components=n),svm.SVC())
+    pipe.fit(x_train,y_train)
+    predict = pipe.predict(x_test)
+    score = metrics.accuracy_score(y_test, predict)
+    return {'n':n,'score':score}
+
+def optimize_parallel(n_start, n_end):
+    data = Parallel(n_jobs=-1)(delayed(pipeline_score)(n) for n in range(n_start,n_end))
+    max = 0
+    max_key = 0
+    for i in data:
+        if i['score']>max:
+            max=i['score']
+            max_key = i['n']
+    return {'n':max_key, 'score':max}
+
+
+@timeit
 def common(n):
-    result = {}
-    for i in range(0,n):
-        result[i] = optimize(70,120)
+    result = Parallel(n_jobs=-1)(delayed(optimize_parallel)(70,120) for i in range(n))
+    # for i in range(0,n):
+    #     result[i] = optimize(70,120)
     return result
 
 
@@ -215,10 +236,10 @@ def find_common(data):
             result[n] = 1
     return {'n':max_key, 'score':max_value}
 
-
-data = common(100)
-result = find_common(data)
-print result
+if __name__ == '__main__':
+    data = common(100)
+    # result = find_common(data)
+    print data
 # x_train_pca, x_test_pca, n= reduce_to(x_train,x_test,110)
 
 from sklearn.lda import LDA
