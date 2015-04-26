@@ -214,7 +214,7 @@ def optimize_parallel(n_start, n_end):
 
 @timeit
 def common(n):
-    result = Parallel(n_jobs=-1)(delayed(optimize_parallel)(70,120) for i in range(n))
+    result = Parallel(n_jobs=-1)(delayed(optimize_parallel)(70,75) for i in range(n))
     # for i in range(0,n):
     #     result[i] = optimize(70,120)
     return result
