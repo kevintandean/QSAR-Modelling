@@ -3,8 +3,13 @@ __author__ = 'kevintandean'
 import pandas as pd
 import numpy as np
 from sklearn.cross_validation import train_test_split
-from sklearn import svm
+from sklearn import svm, metrics, preprocessing
+from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_selection import SelectKBest, SelectPercentile
+from sklearn.feature_selection import chi2, f_classif
+from sklearn.pipeline import make_pipeline
+
 
 
 
@@ -21,9 +26,16 @@ def timeit(method):
 
     return timed
 
-def load_and_clean(path):
+def load_and_clean(path, start, descriptors_n):
     df = pd.read_csv(path, sep='\t')
-    descriptors = df.iloc[:, 15:150]
+    descriptors = df.iloc[:, start:descriptors_n+1]
+    # descriptors = descriptors.loc[df['LOG BB'] == 'BBB+'] + descriptors.loc[df['LOG BB'] == 'BBB-']
+    # mask = df['LOG BB'] == 'BBB+'
+    # mask2 = df['LOG BB'] == 'BBB-'
+    # mask = mask + mask2
+    # descriptors = descriptors[mask]
+    # print descriptors.shape
+
     logbb = df['LOG BB']
 
     def binarize(x):
@@ -47,10 +59,12 @@ def load_and_clean(path):
             negative +=1
 
     descriptors = descriptors.join(logbb)
+    descriptors.fillna(0)
 
-    rows_with_error  = descriptors.apply(
+    rows_with_error = descriptors.apply(
            lambda row : any([ e == '#NAME?' or np.isfinite(float(e))==False for e in row ]), axis=1)
 
+    # print rows_with_error
     descriptors = descriptors[~rows_with_error]
 
 
@@ -59,22 +73,29 @@ def load_and_clean(path):
 
     return descriptors
 
-descriptors = load_and_clean('all data full descriptors.txt')
-print descriptors.head()
+# descriptors = load_and_clean('discretedata.txt',2,2000)
+
 
 
 def split(data, size):
     grouped = data.groupby('LOG BB')
     bbb_neg = grouped.get_group(0.0)
     bbb_pos = grouped.get_group(1.0)
+    descriptor_n = bbb_neg.shape[1]
+
+    # descriptor_n = 2756
+    # descriptor_n = 30
+    n = bbb_neg.shape[0]
+    # n = 850
+    # n = 0
 
 
-    x_pos = bbb_pos.iloc[:929,0:135].values
-    y_pos = bbb_pos.iloc[:929,135:136].values
+    x_pos = bbb_pos.iloc[:n,0:descriptor_n-1].values
+    y_pos = bbb_pos.iloc[:n,descriptor_n-1:descriptor_n].values
     x_pos_train, x_pos_test, y_pos_train, y_pos_test = train_test_split(x_pos, y_pos, test_size=size, random_state=100)
 
-    x_neg = bbb_neg.iloc[:,0:135].values
-    y_neg = bbb_neg.iloc[:,135:136].values
+    x_neg = bbb_neg.iloc[:,0:descriptor_n-1].values
+    y_neg = bbb_neg.iloc[:,descriptor_n-1:descriptor_n].values
     x_neg_train, x_neg_test, y_neg_train, y_neg_test = train_test_split(x_neg, y_neg, test_size=size, random_state=100)
 
     x_train = np.append(x_pos_train, x_neg_train, axis = 0)
@@ -85,24 +106,177 @@ def split(data, size):
 
     return x_train, x_test, y_train, y_test
 
+def scorer(y_test,y_pred):
+    true_negative = 0
+    true_positive = 0
+    false_positive = 0
+    false_negative = 0
+    for i in range(0,len(y_test)):
+        # print y_pred[i], y_test[i]
+        if int(y_pred[i]) == int(y_test[i]):
+            if y_pred[i] == 0:
+                true_negative += 1
+            elif y_pred[i] == 1:
+                true_positive += 1
+        elif int(y_pred[i]) != int(y_test[i]):
+            if y_pred[i] == 0:
+                false_negative += 1
+            elif y_pred[i] == 1:
+                false_positive += 1
+    # print true_positive, true_negative, false_positive, false_negative
+    sensitivity = float(true_positive)/(true_positive+false_negative)
+    specificity = float(true_negative)/(true_negative+false_positive)
 
+    return sensitivity, specificity
+
+from sklearn.decomposition import PCA
+# pca = PCA(copy = True, n_components=10)
+# pca.fit(x_train)
+# x_train_pca = pca.transform(x_train)
+# x_train_pca.shape
+# x_test_pca = pca.transform(x_test)
+# x_test_pca.shape
+
+def reduce_to(x_train,x_test,n):
+    pca = PCA(copy=True, n_components = n)
+    pca.fit(x_train)
+    x_train_pca = pca.transform(x_train)
+    x_test_pca = pca.transform(x_test)
+    return x_train_pca, x_test_pca, n
+
+# n, x_train_pca, x_test_pca = reduce_to(x_train,x_test,15)
+# print x_train_pca.shape, n
+
+def optimize_pca(x_train,x_test,y_train,y_test,n_test):
+    d = {}
+    for i in range(1,n_test):
+        print i
+        x_train_pca, x_test_pca, n= reduce_to(x_train,x_test,i)
+        clf3 = svm.SVC()
+        clf3.fit(x_train_pca, y_train)
+        score = clf3.score(x_test_pca,y_test)
+        d[n] = score
+
+    return d
+
+descriptors = load_and_clean('all data full descriptors.txt',15,2770)
 x_train, x_test, y_train, y_test = split(descriptors, 0.3)
 
-from sklearn.feature_selection import chi2, f_classif
-from sklearn.feature_selection import SelectKBest, SelectPercentile
-from sklearn.feature_selection import RFE
+from sklearn.decomposition import KernelPCA
+from sklearn.pipeline import make_pipeline
 
-estimator = svm.SVC(kernel='linear')
-selector = RFE(estimator,50)
-selector = selector.fit(x_train,y_train)
-x_train_sel = selector.transform(x_train)
-print x_train_sel.shape
+def find_max(dict,item):
+    key = 0
+    max_value = {item:0}
+    for k,v in dict.iteritems():
+#         print 'item',v[item]
+#         print 'max',max_value
+        if v[item]>max_value[item]:
+            max_value=v
+            key = k
+    return {'n':key, 'score':max_value}
 
-# import pickle
-# s = pickle.dumps(selector)
 
-from sklearn.externals import joblib
-joblib.dump(selector, 'filename.pkl')
+def optimize(n_start, n_end):
+    data = {}
+    for i in range(n_start,n_end):
+#         print i
+        pipe = make_pipeline(preprocessing.StandardScaler(),ExtraTreesClassifier(), KernelPCA(n_components=i),svm.SVC())
+        pipe.fit(x_train,y_train)
+        predict = pipe.predict(x_test)
+        score = metrics.accuracy_score(y_test, predict)
+        sensitivity, specificity = scorer(predict,y_test)
+        data[i] = {'tn':specificity, 'tp':sensitivity,'acc':score}
+    max_tn = find_max(data,'tn')
+    max_tp = find_max(data,'tp')
+    max_acc = find_max(data,'acc')
+    return {'max_acc':max_acc}
+
+def common(n):
+    result = {}
+    for i in range(0,n):
+        result[i] = optimize(70,120)
+    return result
+
+
+def find_common(data):
+    result = {}
+    max_key = 0
+    max_value = 0
+    for k,v in data.iteritems():
+        n = v['max_acc']['n']
+        score = v['max_acc']['score']
+        if n in data:
+            result[n]+=1
+            if result[n]>max_value:
+                max_key = n
+                max_value = score
+        else:
+            result[n] = 1
+    return {'n':max_key, 'score':max_value}
+
+
+data = common(100)
+result = find_common(data)
+print result
+# x_train_pca, x_test_pca, n= reduce_to(x_train,x_test,110)
+
+from sklearn.lda import LDA
+
+
+# scaler = preprocessing.StandardScaler().fit(x_train)
+# x_train_scale = scaler.transform(x_train)
+# x_test_scale = scaler.transform(x_test)
+#
+# tree = ExtraTreesClassifier()
+# tree_estimator = tree.fit(x_train_scale, y_train)
+# x_train_scale = tree_estimator.transform(x_train_scale)
+# x_test_scale = tree_estimator.transform(x_test_scale)
+#
+# print 'shape after tree', x_train_scale.shape
+# x_train_pca, x_test_pca, n= reduce_to(x_train_scale,x_test_scale,110)
+#
+# reduce_lda = LDA(n_components=50)
+# reduce_lda.fit(x_train_pca, y_train)
+# x_train_lda = reduce_lda.transform(x_train_pca)
+# x_test_lda = reduce_lda.transform(x_test_pca)
+
+
+def optimize_svm(xtrain, ytrain, xtest, ytest, c_range):
+    data = {}
+    for i in c_range:
+        clf = svm.SVC(C=i)
+        clf.fit(xtrain,ytrain)
+        score = clf.score(xtest, ytest)
+        print i, score
+        y_pred = clf.predict(xtest)
+        sensitivity, specificity = scorer(ytest,y_pred)
+        print 'sensitivity:', sensitivity
+        print 'specificity:', specificity
+        data[i] = score
+    return data
+
+
+
+# result = optimize_svm(x_train_lda, y_train, x_test_lda, y_test, [1000000])
+# print result
+# print x_train
+# print x_test.shape, y_train.shape
+
+
+
+# estimator = svm.SVC(kernel='linear')
+# selector = RFE(estimator,7)
+# selection = selector.fit(x_train,y_train)
+# x_train_sel = selection.transform(x_train)
+# x_test_sel = selection.transform(x_test)
+# print x_train_sel.shape
+#
+# # import pickle
+# # s = pickle.dumps(selector)
+#
+# from sklearn.externals import joblib
+# joblib.dump(selector, 'filename.pkl')
 
 
 
@@ -110,9 +284,10 @@ joblib.dump(selector, 'filename.pkl')
 # forest.fit(x_train,y_train)
 # print forest.score(x_test,y_test)
 #
-# clf = svm.SVC()
-# clf.fit(x_train,y_train)
-# print clf.score(x_test,y_test)
+#
+
+
+
 
 
 #
